@@ -1,0 +1,917 @@
+[1mdiff --git a/.postman/resources.yaml b/.postman/resources.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..5ddefbb[m
+[1m--- /dev/null[m
+[1m+++ b/.postman/resources.yaml[m
+[36m@@ -0,0 +1,15 @@[m
+[32m+[m[32m# Use this workspace to collaborate[m
+[32m+[m[32mworkspace:[m
+[32m+[m[32m  id: c477a7a0-8efa-4704-88da-3c760f68fba8[m
+[32m+[m
+[32m+[m[32m# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud[m
+[32m+[m
+[32m+[m[32mcloudResources:[m
+[32m+[m[32m  collections:[m
+[32m+[m[32m    ../postman/collections/CourseHub API - Buoi 3: a72449d0-cf8c-4cf9-8ff3-046041a46bfb[m
+[32m+[m
+[32m+[m[32m# All resources in the `postman/` folder are automatically registered in Local View.[m
+[32m+[m[32m# Point to additional files outside the `postman/` folder to register them individually. Example:[m
+[32m+[m[32m#localResources:[m
+[32m+[m[32m#  collections:[m
+[32m+[m[32m#    - ../tests/E2E Test Collection/[m
+[1mdiff --git a/backend/.env b/backend/.env[m
+[1mnew file mode 100644[m
+[1mindex 0000000..5b99f61[m
+[1m--- /dev/null[m
+[1m+++ b/backend/.env[m
+[36m@@ -0,0 +1,5 @@[m
+[32m+[m[32mDB_HOST=127.0.0.1[m
+[32m+[m[32mDB_PORT=5432[m
+[32m+[m[32mDB_NAME=coursehub[m
+[32m+[m[32mDB_USER=coursehub_user[m
+[32m+[m[32mDB_PASSWORD=0973733180[m
+\ No newline at end of file[m
+[1mdiff --git a/backend/.env.example b/backend/.env.example[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/backend/__init__.py b/backend/__init__.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/backend/app/__init__.py b/backend/app/__init__.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/backend/app/database.py b/backend/app/database.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..7f54f0d[m
+[1m--- /dev/null[m
+[1m+++ b/backend/app/database.py[m
+[36m@@ -0,0 +1,30 @@[m
+[32m+[m[32mfrom __future__ import annotations[m
+[32m+[m[32mimport os[m
+[32m+[m[32mfrom pathlib import Path[m
+[32m+[m[32mfrom dotenv import load_dotenv[m
+[32m+[m[32mfrom sqlalchemy import URL, create_engine[m
+[32m+[m
+[32m+[m[32m# Tự động định vị tệp .env trong thư mục backend[m
+[32m+[m[32mBASE_DIR = Path(__file__).resolve().parent.parent[m
+[32m+[m[32mENV_PATH = BASE_DIR / ".env"[m
+[32m+[m[32mload_dotenv(dotenv_path=ENV_PATH, override=True)[m
+[32m+[m
+[32m+[m[32m# Kiểm tra xem có thiếu biến môi trường nào không[m
+[32m+[m[32mrequired_names = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"][m
+[32m+[m[32mmissing = [name for name in required_names if not os.getenv(name)][m
+[32m+[m[32mif missing:[m
+[32m+[m[32m    missing_text = ", ".join(missing)[m
+[32m+[m[32m    raise RuntimeError(f"Thieu bien moi truong: {missing_text}")[m
+[32m+[m
+[32m+[m[32m# Tạo URL kết nối tới PostgreSQL dùng pg8000 (Pure Python - không bị AppLocker chặn)[m
+[32m+[m[32mdatabase_url = URL.create([m
+[32m+[m[32m    drivername="postgresql+pg8000",[m
+[32m+[m[32m    username=os.environ["DB_USER"],[m
+[32m+[m[32m    password=os.environ["DB_PASSWORD"],[m
+[32m+[m[32m    host=os.environ["DB_HOST"],[m
+[32m+[m[32m    port=int(os.environ["DB_PORT"]),[m
+[32m+[m[32m    database=os.environ["DB_NAME"],[m
+[32m+[m[32m)[m
+[32m+[m
+[32m+[m[32m# Tạo Engine đồng bộ[m
+[32m+[m[32mengine = create_engine(database_url, pool_pre_ping=True)[m
+\ No newline at end of file[m
+[1mdiff --git a/backend/app/main.py b/backend/app/main.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..95925c5[m
+[1m--- /dev/null[m
+[1m+++ b/backend/app/main.py[m
+[36m@@ -0,0 +1,231 @@[m
+[32m+[m[32mfrom __future__ import annotations[m
+[32m+[m[32mimport logging[m
+[32m+[m[32mfrom fastapi import FastAPI, HTTPException, Query, Response, status[m
+[32m+[m[32mfrom sqlalchemy import text[m
+[32m+[m[32mfrom sqlalchemy.exc import SQLAlchemyError[m
+[32m+[m[32mfrom .database import engine[m
+[32m+[m[32mfrom .schemas import EnrollmentCreate[m
+[32m+[m
+[32m+[m[32mlogger = logging.getLogger(__name__)[m
+[32m+[m
+[32m+[m[32mapp = FastAPI([m
+[32m+[m[32m    title="CourseHub API",[m
+[32m+[m[32m    version="0.3.0",[m
+[32m+[m[32m    description="API thuc hanh Buoi 3 - Co so du lieu Web va he thong thong tin",[m
+[32m+[m[32m)[m
+[32m+[m
+[32m+[m[32m@app.get("/")[m
+[32m+[m[32mdef read_root() -> dict[str, str]:[m
+[32m+[m[32m    return {"message": "CourseHub API dang hoat dong"}[m
+[32m+[m
+[32m+[m[32m@app.get("/health")[m
+[32m+[m[32mdef health_check() -> dict[str, str]:[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        with engine.connect() as connection:[m
+[32m+[m[32m            connection.execute(text("SELECT 1"))[m
+[32m+[m[32m    except SQLAlchemyError as exc:[m
+[32m+[m[32m        logger.exception("Khong ket noi duoc co so du lieu")[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,[m
+[32m+[m[32m            detail="Khong ket noi duoc co so du lieu",[m
+[32m+[m[32m        ) from exc[m
+[32m+[m[32m    return {"status": "ok", "database": "connected"}[m
+[32m+[m
+[32m+[m[32m@app.get("/courses")[m
+[32m+[m[32mdef list_courses([m
+[32m+[m[32m    q: str | None = Query(default=None, min_length=1),[m
+[32m+[m[32m) -> list[dict[str, object]]:[m
+[32m+[m[32m    sql = """[m
+[32m+[m[32m    SELECT code, name, credits[m
+[32m+[m[32m    FROM courses[m
+[32m+[m[32m    """[m
+[32m+[m[32m    parameters: dict[str, object] = {}[m
+[32m+[m[32m    if q is not None:[m
+[32m+[m[32m        keyword = q.strip().lower()[m
+[32m+[m[32m        if not keyword:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_400_BAD_REQUEST,[m
+[32m+[m[32m                detail="Tu khoa tim kiem khong duoc rong",[m
+[32m+[m[32m            )[m
+[32m+[m[32m        sql += """[m
+[32m+[m[32m        WHERE LOWER(code) LIKE :keyword[m
+[32m+[m[32m        OR LOWER(name) LIKE :keyword[m
+[32m+[m[32m        """[m
+[32m+[m[32m        parameters["keyword"] = f"%{keyword}%"[m
+[32m+[m[32m    sql += " ORDER BY code"[m
+[32m+[m[32m    with engine.connect() as connection:[m
+[32m+[m[32m        rows = connection.execute(text(sql), parameters).mappings().all()[m
+[32m+[m[32m        return [dict(row) for row in rows][m
+[32m+[m
+[32m+[m[32m@app.get("/courses/{course_code}")[m
+[32m+[m[32mdef get_course(course_code: str) -> dict[str, object]:[m
+[32m+[m[32m    sql = """[m
+[32m+[m[32m    SELECT code, name, credits[m
+[32m+[m[32m    FROM courses[m
+[32m+[m[32m    WHERE code = :course_code[m
+[32m+[m[32m    """[m
+[32m+[m[32m    with engine.connect() as connection:[m
+[32m+[m[32m        row = connection.execute([m
+[32m+[m[32m            text(sql),[m
+[32m+[m[32m            {"course_code": course_code.upper()},[m
+[32m+[m[32m        ).mappings().first()[m
+[32m+[m[32m        if row is None:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_404_NOT_FOUND,[m
+[32m+[m[32m                detail="Khong tim thay hoc phan",[m
+[32m+[m[32m            )[m
+[32m+[m[32m        return dict(row)[m
+[32m+[m
+[32m+[m[32m@app.get("/sections")[m
+[32m+[m[32mdef list_sections([m
+[32m+[m[32m    available_only: bool = False,[m
+[32m+[m[32m) -> list[dict[str, object]]:[m
+[32m+[m[32m    sql = """[m
+[32m+[m[32m    SELECT class_id, course_code, capacity, enrolled, remaining[m
+[32m+[m[32m    FROM v_section_summary[m
+[32m+[m[32m    """[m
+[32m+[m[32m    if available_only:[m
+[32m+[m[32m        sql += " WHERE remaining > 0"[m
+[32m+[m[32m    sql += " ORDER BY class_id"[m
+[32m+[m[32m    with engine.connect() as connection:[m
+[32m+[m[32m        rows = connection.execute(text(sql)).mappings().all()[m
+[32m+[m[32m        return [dict(row) for row in rows][m
+[32m+[m
+[32m+[m[32m@app.get("/students/{student_id}/enrollments")[m
+[32m+[m[32mdef list_student_enrollments(student_id: str) -> list[dict[str, object]]:[m
+[32m+[m[32m    student_sql = "SELECT id FROM students WHERE id = :student_id"[m
+[32m+[m[32m    enrollment_sql = """[m
+[32m+[m[32m    SELECT e.student_id,[m
+[32m+[m[32m           s.name AS student_name,[m
+[32m+[m[32m           cs.id AS class_section_id,[m
+[32m+[m[32m           c.code AS course_code,[m
+[32m+[m[32m           c.name AS course_name,[m
+[32m+[m[32m           e.registered_at[m
+[32m+[m[32m    FROM enrollments AS e[m
+[32m+[m[32m    JOIN students AS s ON s.id = e.student_id[m
+[32m+[m[32m    JOIN class_sections AS cs ON cs.id = e.class_section_id[m
+[32m+[m[32m    JOIN courses AS c ON c.code = cs.course_code[m
+[32m+[m[32m    WHERE e.student_id = :student_id[m
+[32m+[m[32m    ORDER BY cs.id[m
+[32m+[m[32m    """[m
+[32m+[m[32m    with engine.connect() as connection:[m
+[32m+[m[32m        student = connection.execute([m
+[32m+[m[32m            text(student_sql),[m
+[32m+[m[32m            {"student_id": student_id},[m
+[32m+[m[32m        ).first()[m
+[32m+[m[32m        if student is None:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_404_NOT_FOUND,[m
+[32m+[m[32m                detail="Khong tim thay sinh vien",[m
+[32m+[m[32m            )[m
+[32m+[m[32m        rows = connection.execute([m
+[32m+[m[32m            text(enrollment_sql),[m
+[32m+[m[32m            {"student_id": student_id},[m
+[32m+[m[32m        ).mappings().all()[m
+[32m+[m[32m        return [dict(row) for row in rows][m
+[32m+[m
+[32m+[m[32m@app.post([m
+[32m+[m[32m    "/enrollments",[m
+[32m+[m[32m    status_code=status.HTTP_201_CREATED,[m
+[32m+[m[32m)[m
+[32m+[m[32mdef create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:[m
+[32m+[m[32m    student_sql = "SELECT id FROM students WHERE id = :student_id"[m
+[32m+[m[32m    section_sql = """[m
+[32m+[m[32m    SELECT cs.id,[m
+[32m+[m[32m           cs.capacity,[m
+[32m+[m[32m           COUNT(e.student_id) AS enrolled[m
+[32m+[m[32m    FROM class_sections AS cs[m
+[32m+[m[32m    LEFT JOIN enrollments AS e ON e.class_section_id = cs.id[m
+[32m+[m[32m    WHERE cs.id = :class_section_id[m
+[32m+[m[32m    GROUP BY cs.id, cs.capacity[m
+[32m+[m[32m    """[m
+[32m+[m[32m    duplicate_sql = """[m
+[32m+[m[32m    SELECT 1[m
+[32m+[m[32m    FROM enrollments[m
+[32m+[m[32m    WHERE student_id = :student_id[m
+[32m+[m[32m      AND class_section_id = :class_section_id[m
+[32m+[m[32m    """[m
+[32m+[m[32m    insert_sql = """[m
+[32m+[m[32m    INSERT INTO enrollments (student_id, class_section_id)[m
+[32m+[m[32m    VALUES (:student_id, :class_section_id)[m
+[32m+[m[32m    """[m
+[32m+[m
+[32m+[m[32m    parameters = {[m
+[32m+[m[32m        "student_id": payload.student_id,[m
+[32m+[m[32m        "class_section_id": payload.class_section_id,[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    with engine.begin() as connection:[m
+[32m+[m[32m        # 1. Kiểm tra sinh viên tồn tại[m
+[32m+[m[32m        student = connection.execute([m
+[32m+[m[32m            text(student_sql),[m
+[32m+[m[32m            {"student_id": payload.student_id},[m
+[32m+[m[32m        ).first()[m
+[32m+[m[32m        if student is None:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_404_NOT_FOUND,[m
+[32m+[m[32m                detail="Khong tim thay sinh vien",[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        # 2. Kiểm tra lớp học phần tồn tại & lấy sĩ số[m
+[32m+[m[32m        section = connection.execute([m
+[32m+[m[32m            text(section_sql),[m
+[32m+[m[32m            {"class_section_id": payload.class_section_id},[m
+[32m+[m[32m        ).mappings().first()[m
+[32m+[m[32m        if section is None:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_404_NOT_FOUND,[m
+[32m+[m[32m                detail="Khong tim thay lop hoc phan",[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        # 3. Kiểm tra đăng ký trùng[m
+[32m+[m[32m        duplicated = connection.execute([m
+[32m+[m[32m            text(duplicate_sql),[m
+[32m+[m[32m            parameters,[m
+[32m+[m[32m        ).first()[m
+[32m+[m[32m        if duplicated is not None:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_409_CONFLICT,[m
+[32m+[m[32m                detail="Sinh vien da dang ky lop nay",[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        # 4. Kiểm tra số chỗ còn lại của lớp[m
+[32m+[m[32m        if int(section["enrolled"]) >= int(section["capacity"]):[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_409_CONFLICT,[m
+[32m+[m[32m                detail="Lop hoc phan da het cho",[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        # Thực hiện ghi dữ liệu[m
+[32m+[m[32m        connection.execute(text(insert_sql), parameters)[m
+[32m+[m
+[32m+[m[32m        return {[m
+[32m+[m[32m            "message": "Dang ky thanh cong",[m
+[32m+[m[32m            "student_id": payload.student_id,[m
+[32m+[m[32m            "class_section_id": payload.class_section_id,[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m@app.delete([m
+[32m+[m[32m    "/enrollments/{student_id}/{class_section_id}",[m
+[32m+[m[32m    status_code=status.HTTP_204_NO_CONTENT,[m
+[32m+[m[32m)[m
+[32m+[m[32mdef delete_enrollment(student_id: str, class_section_id: str) -> Response:[m
+[32m+[m[32m    sql = """[m
+[32m+[m[32m    DELETE FROM enrollments[m
+[32m+[m[32m    WHERE student_id = :student_id[m
+[32m+[m[32m      AND class_section_id = :class_section_id[m
+[32m+[m[32m    """[m
+[32m+[m[32m    with engine.begin() as connection:[m
+[32m+[m[32m        result = connection.execute([m
+[32m+[m[32m            text(sql),[m
+[32m+[m[32m            {[m
+[32m+[m[32m                "student_id": student_id,[m
+[32m+[m[32m                "class_section_id": class_section_id,[m
+[32m+[m[32m            },[m
+[32m+[m[32m        )[m
+[32m+[m[32m        if result.rowcount == 0:[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_404_NOT_FOUND,[m
+[32m+[m[32m                detail="Khong tim thay dang ky can huy",[m
+[32m+[m[32m            )[m
+[32m+[m[32m        return Response(status_code=status.HTTP_204_NO_CONTENT)[m
+\ No newline at end of file[m
+[1mdiff --git a/backend/app/schemas.py b/backend/app/schemas.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..d950b66[m
+[1m--- /dev/null[m
+[1m+++ b/backend/app/schemas.py[m
+[36m@@ -0,0 +1,14 @@[m
+[32m+[m[32mfrom __future__ import annotations[m
+[32m+[m[32mfrom pydantic import BaseModel, Field[m
+[32m+[m
+[32m+[m[32mclass EnrollmentCreate(BaseModel):[m
+[32m+[m[32m    student_id: str = Field([m
+[32m+[m[32m        min_length=8,[m
+[32m+[m[32m        max_length=8,[m
+[32m+[m[32m        examples=["22000004"],[m
+[32m+[m[32m    )[m
+[32m+[m[32m    class_section_id: str = Field([m
+[32m+[m[32m        min_length=1,[m
+[32m+[m[32m        max_length=20,[m
+[32m+[m[32m        examples=["WEB-01"],[m
+[32m+[m[32m    )[m
+\ No newline at end of file[m
+[1mdiff --git a/backend/requirements.txt b/backend/requirements.txt[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b09d3df[m
+[1m--- /dev/null[m
+[1m+++ b/backend/requirements.txt[m
+[36m@@ -0,0 +1,5 @@[m
+[32m+[m[32mfastapi>=0.115,<1[m
+[32m+[m[32muvicorn[standard]>=0.30,<1[m
+[32m+[m[32mSQLAlchemy>=2.0,<3[m
+[32m+[m[32mpsycopg[binary]>=3.2,<4[m
+[32m+[m[32mpython-dotenv>=1.0,<2[m
+\ No newline at end of file[m
+[1mdiff --git a/docs/week03_notes.md b/docs/week03_notes.md[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e69de29[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/.resources/definition.yaml b/postman/collections/CourseHub API - Buoi 3/.resources/definition.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..f2ab5a0[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/.resources/definition.yaml[m	
+[36m@@ -0,0 +1,2 @@[m
+[32m+[m[32m$kind: collection[m
+[32m+[m[32mdescription: Bo suu tap API kiem thu CourseHub Buoi 3 day du (FastAPI + PostgreSQL) bao gom ca cac bai tap tu thuc hanh[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/01 - Health Check.request.yaml b/postman/collections/CourseHub API - Buoi 3/01 - Health Check.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b58803b[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/01 - Health Check.request.yaml[m	
+[36m@@ -0,0 +1,19 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/health"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Response la JSON", () => {[m
+[32m+[m[32m          pm.response.to.be.json;[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Database da ket noi", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.status).to.eql("ok");[m
+[32m+[m[32m          pm.expect(data.database).to.eql("connected");[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 1000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/02 - List courses.request.yaml b/postman/collections/CourseHub API - Buoi 3/02 - List courses.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..2e1526e[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/02 - List courses.request.yaml[m	
+[36m@@ -0,0 +1,15 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Co it nhat 3 hoc phan", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.length).to.be.at.least(3);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 2000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/03 - Search courses.request.yaml b/postman/collections/CourseHub API - Buoi 3/03 - Search courses.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..c1fa5c2[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/03 - Search courses.request.yaml[m	
+[36m@@ -0,0 +1,17 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses?q=web"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mqueryParams:[m
+[32m+[m[32m  q: web[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Tim thay hoc phan Web INT2204", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.some(c => c.code === "INT2204")).to.be.true;[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 3000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/04 - Search courses empty keyword error.request.yaml b/postman/collections/CourseHub API - Buoi 3/04 - Search courses empty keyword error.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..d7f313f[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/04 - Search courses empty keyword error.request.yaml[m	
+[36m@@ -0,0 +1,13 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses?q=%20%20"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mqueryParams:[m
+[32m+[m[32m  q: "%20%20"[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 400", () => {[m
+[32m+[m[32m          pm.response.to.have.status(400);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 4000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/05 - Courses pagination (Bai 4).request.yaml b/postman/collections/CourseHub API - Buoi 3/05 - Courses pagination (Bai 4).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..851229d[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/05 - Courses pagination (Bai 4).request.yaml[m	
+[36m@@ -0,0 +1,18 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses?skip=0&limit=2"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mqueryParams:[m
+[32m+[m[32m  skip: "0"[m
+[32m+[m[32m  limit: "2"[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Dung so luong limit 2", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.length).to.eql(2);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 5000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/06 - Course detail.request.yaml b/postman/collections/CourseHub API - Buoi 3/06 - Course detail.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..eabba94[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/06 - Course detail.request.yaml[m	
+[36m@@ -0,0 +1,16 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses/INT2204"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Dung thong tin INT2204", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.code).to.eql("INT2204");[m
+[32m+[m[32m          pm.expect(data.credits).to.eql(3);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 6000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/07 - Course detail not found.request.yaml b/postman/collections/CourseHub API - Buoi 3/07 - Course detail not found.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..ab83444[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/07 - Course detail not found.request.yaml[m	
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/courses/UNKNOWN"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 404", () => {[m
+[32m+[m[32m          pm.response.to.have.status(404);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 7000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/08 - List lecturers (Bai 1).request.yaml b/postman/collections/CourseHub API - Buoi 3/08 - List lecturers (Bai 1).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..6e47f02[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/08 - List lecturers (Bai 1).request.yaml[m	
+[36m@@ -0,0 +1,16 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/lecturers"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Chua GV01 va GV02", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.some(l => l.id === "GV01")).to.be.true;[m
+[32m+[m[32m          pm.expect(data.some(l => l.id === "GV02")).to.be.true;[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 8000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/09 - List sections all.request.yaml b/postman/collections/CourseHub API - Buoi 3/09 - List sections all.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..d4944ea[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/09 - List sections all.request.yaml[m	
+[36m@@ -0,0 +1,15 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Co 4 lop hoc phan", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.length).to.eql(4);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 9000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/10 - Available sections.request.yaml b/postman/collections/CourseHub API - Buoi 3/10 - Available sections.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..5c032fa[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/10 - Available sections.request.yaml[m	
+[36m@@ -0,0 +1,17 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections?available_only=true"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mqueryParams:[m
+[32m+[m[32m  available_only: "true"[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Cac lop tra ve deu con cho", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          data.forEach(s => pm.expect(s.remaining).to.be.above(0));[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 10000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/11 - Section detail (Bai 2).request.yaml b/postman/collections/CourseHub API - Buoi 3/11 - Section detail (Bai 2).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..a818e6b[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/11 - Section detail (Bai 2).request.yaml[m	
+[36m@@ -0,0 +1,20 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/WEB-01"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Dung thong tin WEB-01", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.class_id).to.eql("WEB-01");[m
+[32m+[m[32m          pm.expect(data.course_code).to.eql("INT2204");[m
+[32m+[m[32m          pm.expect(data.lecturer_id).to.eql("GV01");[m
+[32m+[m[32m          pm.expect(data.capacity).to.eql(3);[m
+[32m+[m[32m          pm.expect(data.enrolled).to.eql(2);[m
+[32m+[m[32m          pm.expect(data.remaining).to.eql(1);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 11000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/12 - Section detail not found (Bai 2).request.yaml b/postman/collections/CourseHub API - Buoi 3/12 - Section detail not found (Bai 2).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..0c393df[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/12 - Section detail not found (Bai 2).request.yaml[m	
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/UNKNOWN"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 404", () => {[m
+[32m+[m[32m          pm.response.to.have.status(404);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 12000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/13 - Update section capacity (Bai 3).request.yaml b/postman/collections/CourseHub API - Buoi 3/13 - Update section capacity (Bai 3).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..7d998c4[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/13 - Update section capacity (Bai 3).request.yaml[m	
+[36m@@ -0,0 +1,24 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/WEB-01/capacity"[m
+[32m+[m[32mmethod: PATCH[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "capacity": 4[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Suc chua moi la 4", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.capacity).to.eql(4);[m
+[32m+[m[32m          pm.expect(data.remaining).to.eql(2);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 13000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/14 - Update section capacity conflict (Bai 3).request.yaml b/postman/collections/CourseHub API - Buoi 3/14 - Update section capacity conflict (Bai 3).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..fea5e87[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/14 - Update section capacity conflict (Bai 3).request.yaml[m	
+[36m@@ -0,0 +1,19 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/WEB-01/capacity"[m
+[32m+[m[32mmethod: PATCH[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "capacity": 1[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 409", () => {[m
+[32m+[m[32m          pm.response.to.have.status(409);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 14000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/15 - Reset section capacity to standard (Bai 3).request.yaml b/postman/collections/CourseHub API - Buoi 3/15 - Reset section capacity to standard (Bai 3).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..f6eb11f[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/15 - Reset section capacity to standard (Bai 3).request.yaml[m	
+[36m@@ -0,0 +1,24 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/WEB-01/capacity"[m
+[32m+[m[32mmethod: PATCH[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "capacity": 3[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Khoi phuc suc chua ve 3", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.capacity).to.eql(3);[m
+[32m+[m[32m          pm.expect(data.remaining).to.eql(1);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 15000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/16 - Update section capacity not found (Bai 3).request.yaml b/postman/collections/CourseHub API - Buoi 3/16 - Update section capacity not found (Bai 3).request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..47c990b[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/16 - Update section capacity not found (Bai 3).request.yaml[m	
+[36m@@ -0,0 +1,19 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/sections/UNKNOWN/capacity"[m
+[32m+[m[32mmethod: PATCH[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "capacity": 4[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 404", () => {[m
+[32m+[m[32m          pm.response.to.have.status(404);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 16000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/17 - Student enrollments.request.yaml b/postman/collections/CourseHub API - Buoi 3/17 - Student enrollments.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..23cce1b[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/17 - Student enrollments.request.yaml[m	
+[36m@@ -0,0 +1,15 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/students/22000001/enrollments"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 200", () => {[m
+[32m+[m[32m          pm.response.to.have.status(200);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Sinh vien 22000001 da dang ky 2 lop", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.length).to.eql(2);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 17000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/18 - Student enrollments not found.request.yaml b/postman/collections/CourseHub API - Buoi 3/18 - Student enrollments not found.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..2012f8d[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/18 - Student enrollments not found.request.yaml[m	
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/students/99999999/enrollments"[m
+[32m+[m[32mmethod: GET[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 404", () => {[m
+[32m+[m[32m          pm.response.to.have.status(404);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 18000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/19 - Create enrollment.request.yaml b/postman/collections/CourseHub API - Buoi 3/19 - Create enrollment.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..3782404[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/19 - Create enrollment.request.yaml[m	
+[36m@@ -0,0 +1,26 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/enrollments"[m
+[32m+[m[32mmethod: POST[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "student_id": "22000004",[m
+[32m+[m[32m      "class_section_id": "WEB-01"[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 201", () => {[m
+[32m+[m[32m          pm.response.to.have.status(201);[m
+[32m+[m[32m      });[m
+[32m+[m[32m      pm.test("Dang ky thanh cong", () => {[m
+[32m+[m[32m          const data = pm.response.json();[m
+[32m+[m[32m          pm.expect(data.message).to.eql("Dang ky thanh cong");[m
+[32m+[m[32m          pm.expect(data.student_id).to.eql("22000004");[m
+[32m+[m[32m          pm.expect(data.class_section_id).to.eql("WEB-01");[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 19000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/20 - Create enrollment duplicate.request.yaml b/postman/collections/CourseHub API - Buoi 3/20 - Create enrollment duplicate.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..f6ffc86[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/20 - Create enrollment duplicate.request.yaml[m	
+[36m@@ -0,0 +1,20 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/enrollments"[m
+[32m+[m[32mmethod: POST[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "student_id": "22000004",[m
+[32m+[m[32m      "class_section_id": "WEB-01"[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 409", () => {[m
+[32m+[m[32m          pm.response.to.have.status(409);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 20000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/21 - Create enrollment validation error.request.yaml b/postman/collections/CourseHub API - Buoi 3/21 - Create enrollment validation error.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..ecd8cd1[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/21 - Create enrollment validation error.request.yaml[m	
+[36m@@ -0,0 +1,20 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/enrollments"[m
+[32m+[m[32mmethod: POST[m
+[32m+[m[32mheaders:[m
+[32m+[m[32m  Content-Type: application/json[m
+[32m+[m[32mbody:[m
+[32m+[m[32m  type: text[m
+[32m+[m[32m  content: |-[m
+[32m+[m[32m    {[m
+[32m+[m[32m      "student_id": "123",[m
+[32m+[m[32m      "class_section_id": "WEB-01"[m
+[32m+[m[32m    }[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 422", () => {[m
+[32m+[m[32m          pm.response.to.have.status(422);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 21000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/22 - Delete enrollment.request.yaml b/postman/collections/CourseHub API - Buoi 3/22 - Delete enrollment.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..0969d59[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/22 - Delete enrollment.request.yaml[m	
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/enrollments/22000004/WEB-01"[m
+[32m+[m[32mmethod: DELETE[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 204", () => {[m
+[32m+[m[32m          pm.response.to.have.status(204);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 22000[m
+[1mdiff --git a/postman/collections/CourseHub API - Buoi 3/23 - Delete enrollment not found.request.yaml b/postman/collections/CourseHub API - Buoi 3/23 - Delete enrollment not found.request.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..7f3beff[m
+[1m--- /dev/null[m
+[1m+++ b/postman/collections/CourseHub API - Buoi 3/23 - Delete enrollment not found.request.yaml[m	
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m$kind: http-request[m
+[32m+[m[32murl: "{{base_url}}/enrollments/22000004/WEB-01"[m
+[32m+[m[32mmethod: DELETE[m
+[32m+[m[32mscripts:[m
+[32m+[m[32m  - type: afterResponse[m
+[32m+[m[32m    code: |-[m
+[32m+[m[32m      pm.test("Status code la 404", () => {[m
+[32m+[m[32m          pm.response.to.have.status(404);[m
+[32m+[m[32m      });[m
+[32m+[m[32m    language: text/javascript[m
+[32m+[m[32morder: 23000[m
+[1mdiff --git a/postman/environments/CourseHub Local.environment.yaml b/postman/environments/CourseHub Local.environment.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..49d0210[m
+[1m--- /dev/null[m
+[1m+++ b/postman/environments/CourseHub Local.environment.yaml[m	
+[36m@@ -0,0 +1,4 @@[m
+[32m+[m[32mname: CourseHub Local[m
+[32m+[m[32mvalues:[m
+[32m+[m[32m  - key: base_url[m
+[32m+[m[32m    value: 'http://127.0.0.1:8000'[m
+[1mdiff --git a/postman/globals/workspace.globals.yaml b/postman/globals/workspace.globals.yaml[m
+[1mnew file mode 100644[m
+[1mindex 0000000..e96c6d6[m
+[1m--- /dev/null[m
+[1m+++ b/postman/globals/workspace.globals.yaml[m
+[36m@@ -0,0 +1,2 @@[m
+[32m+[m[32mname: Globals[m
+[32m+[m[32mvalues: [][m
+[1mdiff --git a/requirements.txt b/requirements.txt[m
+[1mnew file mode 100644[m
+[1mindex 0000000..48bb128[m
+[1m--- /dev/null[m
+[1m+++ b/requirements.txt[m
+[36m@@ -0,0 +1,5 @@[m
+[32m+[m[32mfastapi[m
+[32m+[m[32muvicorn[standard][m
+[32m+[m[32msqlalchemy[m
+[32m+[m[32mpsycopg[binary][m
+[32m+[m[32mpython-dotenv[m
+\ No newline at end of file[m
