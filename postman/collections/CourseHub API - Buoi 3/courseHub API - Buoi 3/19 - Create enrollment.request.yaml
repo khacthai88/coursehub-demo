@@ -23,4 +23,4 @@ scripts:
           pm.expect(data.class_section_id).to.eql("WEB-01");
       });
     language: text/javascript
-order: 19000
+order: 18000

@@ -12,3 +12,6 @@ class EnrollmentCreate(BaseModel):
         max_length=20,
         examples=["WEB-01"],
     )
+
+class SectionCapacityUpdate(BaseModel):
+    capacity: int = Field(gt=0, examples=[4])

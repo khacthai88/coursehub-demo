@@ -1,17 +1,15 @@
 $kind: http-request
-url: "{{base_url}}/sections?available_only=true"
+url: "{{base_url}}/students/22000001/enrollments"
 method: GET
-queryParams:
-  available_only: "true"
 scripts:
   - type: afterResponse
     code: |-
       pm.test("Status code la 200", () => {
           pm.response.to.have.status(200);
       });
-      pm.test("Cac lop tra ve deu con cho", () => {
+      pm.test("Sinh vien 22000001 da dang ky 2 lop", () => {
           const data = pm.response.json();
-          data.forEach(s => pm.expect(s.remaining).to.be.above(0));
+          pm.expect(data.length).to.eql(2);
       });
     language: text/javascript
-order: 10000
+order: 16000

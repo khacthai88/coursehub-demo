@@ -4,8 +4,8 @@ method: DELETE
 scripts:
   - type: afterResponse
     code: |-
-      pm.test("Status code la 204", () => {
-          pm.response.to.have.status(204);
+      pm.test("Status code la 404", () => {
+          pm.response.to.have.status(404);
       });
     language: text/javascript
 order: 22000

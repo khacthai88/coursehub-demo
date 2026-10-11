@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{base_url}}/lecturers"
+url: "{{base_url}}/sections"
 method: GET
 scripts:
   - type: afterResponse
@@ -7,10 +7,9 @@ scripts:
       pm.test("Status code la 200", () => {
           pm.response.to.have.status(200);
       });
-      pm.test("Chua GV01 va GV02", () => {
+      pm.test("Co 4 lop hoc phan", () => {
           const data = pm.response.json();
-          pm.expect(data.some(l => l.id === "GV01")).to.be.true;
-          pm.expect(data.some(l => l.id === "GV02")).to.be.true;
+          pm.expect(data.length).to.eql(4);
       });
     language: text/javascript
 order: 8000

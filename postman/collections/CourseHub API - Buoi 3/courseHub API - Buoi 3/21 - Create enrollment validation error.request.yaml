@@ -7,14 +7,14 @@ body:
   type: text
   content: |-
     {
-      "student_id": "22000004",
+      "student_id": "123",
       "class_section_id": "WEB-01"
     }
 scripts:
   - type: afterResponse
     code: |-
-      pm.test("Status code la 409", () => {
-          pm.response.to.have.status(409);
+      pm.test("Status code la 422", () => {
+          pm.response.to.have.status(422);
       });
     language: text/javascript
 order: 20000

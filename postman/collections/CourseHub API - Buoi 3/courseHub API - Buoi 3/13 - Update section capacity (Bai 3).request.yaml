@@ -21,4 +21,4 @@ scripts:
           pm.expect(data.remaining).to.eql(2);
       });
     language: text/javascript
-order: 13000
+order: 12000
