@@ -2,16 +2,16 @@ from __future__ import annotations
 import logging
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .database import engine
-from .schemas import EnrollmentCreate
 from .schemas import EnrollmentCreate, SectionCapacityUpdate
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="CourseHub API",
-    version="0.3.0",
-    description="API thuc hanh Buoi 3 - Co so du lieu Web va he thong thong tin",
+    version="0.4.0",
+    description="API thuc hanh Buoi 4 - transaction, locking va hieu nang",
 )
 
 @app.get("/")
@@ -34,25 +34,26 @@ def health_check() -> dict[str, str]:
 @app.get("/courses")
 def list_courses(
     q: str | None = Query(default=None, min_length=1),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=100)
 ) -> list[dict[str, object]]:
-    sql = """
-    SELECT code, name, credits
-    FROM courses
-    """
+    sql = "SELECT code, name, credits FROM courses"
     parameters: dict[str, object] = {}
+
     if q is not None:
         keyword = q.strip().lower()
         if not keyword:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tu khoa tim kiem khong duoc rong",
+                detail="Tu khoa tim kiem khong duoc rong"
             )
-        sql += """
-        WHERE LOWER(code) LIKE :keyword
-        OR LOWER(name) LIKE :keyword
-        """
+        sql += " WHERE LOWER(code) LIKE :keyword OR LOWER(name) LIKE :keyword"
         parameters["keyword"] = f"%{keyword}%"
-    sql += " ORDER BY code"
+
+    sql += " ORDER BY code OFFSET :skip LIMIT :limit"
+    parameters["skip"] = skip
+    parameters["limit"] = limit
+
     with engine.connect() as connection:
         rows = connection.execute(text(sql), parameters).mappings().all()
         return [dict(row) for row in rows]
@@ -124,20 +125,18 @@ def list_student_enrollments(student_id: str) -> list[dict[str, object]]:
         ).mappings().all()
         return [dict(row) for row in rows]
 
+# --- V.2 & V.3: THAY TOÀN BỘ HÀM POST /enrollments (SỬ DỤNG ROW LOCK FOR UPDATE) ---
 @app.post(
     "/enrollments",
     status_code=status.HTTP_201_CREATED,
 )
 def create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:
     student_sql = "SELECT id FROM students WHERE id = :student_id"
-    section_sql = """
-    SELECT cs.id,
-           cs.capacity,
-           COUNT(e.student_id) AS enrolled
-    FROM class_sections AS cs
-    LEFT JOIN enrollments AS e ON e.class_section_id = cs.id
-    WHERE cs.id = :class_section_id
-    GROUP BY cs.id, cs.capacity
+    lock_section_sql = """
+    SELECT id, capacity
+    FROM class_sections
+    WHERE id = :class_section_id
+    FOR UPDATE
     """
     duplicate_sql = """
     SELECT 1
@@ -145,9 +144,20 @@ def create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:
     WHERE student_id = :student_id
       AND class_section_id = :class_section_id
     """
+    count_sql = """
+    SELECT COUNT(*)
+    FROM enrollments
+    WHERE class_section_id = :class_section_id
+    """
     insert_sql = """
     INSERT INTO enrollments (student_id, class_section_id)
     VALUES (:student_id, :class_section_id)
+    """
+    event_sql = """
+    INSERT INTO enrollment_events
+    (student_id, class_section_id, event_type, source, dataset)
+    VALUES
+    (:student_id, :class_section_id, 'CREATED', 'api', 'demo')
     """
 
     parameters = {
@@ -155,80 +165,130 @@ def create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:
         "class_section_id": payload.class_section_id,
     }
 
-    with engine.begin() as connection:
-        # 1. Kiểm tra sinh viên tồn tại
-        student = connection.execute(
-            text(student_sql),
-            {"student_id": payload.student_id},
-        ).first()
-        if student is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Khong tim thay sinh vien",
-            )
+    try:
+        with engine.begin() as connection:
+            # 1. Kiểm tra sinh viên
+            student = connection.execute(
+                text(student_sql),
+                {"student_id": payload.student_id},
+            ).first()
+            if student is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay sinh vien",
+                )
 
-        # 2. Kiểm tra lớp học phần tồn tại & lấy sĩ số
-        section = connection.execute(
-            text(section_sql),
-            {"class_section_id": payload.class_section_id},
-        ).mappings().first()
-        if section is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Khong tim thay lop hoc phan",
-            )
+            # 2. Khóa dòng lớp học phần (Row Lock)
+            section = connection.execute(
+                text(lock_section_sql),
+                {"class_section_id": payload.class_section_id},
+            ).mappings().first()
+            if section is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay lop hoc phan",
+                )
 
-        # 3. Kiểm tra đăng ký trùng
-        duplicated = connection.execute(
-            text(duplicate_sql),
-            parameters,
-        ).first()
-        if duplicated is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Sinh vien da dang ky lop nay",
-            )
+            # 3. Kiểm tra đăng ký trùng
+            duplicated = connection.execute(
+                text(duplicate_sql), parameters
+            ).first()
+            if duplicated is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Sinh vien da dang ky lop nay",
+                )
 
-        # 4. Kiểm tra số chỗ còn lại của lớp
-        if int(section["enrolled"]) >= int(section["capacity"]):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Lop hoc phan da het cho",
-            )
+            # 4. Đếm số lượng sinh viên đã đăng ký
+            enrolled = connection.execute(
+                text(count_sql),
+                {"class_section_id": payload.class_section_id},
+            ).scalar_one()
 
-        # Thực hiện ghi dữ liệu
-        connection.execute(text(insert_sql), parameters)
+            # 5. Kiểm tra sức chứa
+            if int(enrolled) >= int(section["capacity"]):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Lop hoc phan da het cho",
+                )
 
-        return {
-            "message": "Dang ky thanh cong",
-            "student_id": payload.student_id,
-            "class_section_id": payload.class_section_id,
-        }
+            # 6. Thêm đăng ký & Ghi audit event
+            connection.execute(text(insert_sql), parameters)
+            connection.execute(text(event_sql), parameters)
 
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Dang ky xung dot voi du lieu hien tai",
+        ) from exc
+
+    return {
+        "message": "Dang ky thanh cong",
+        "student_id": payload.student_id,
+        "class_section_id": payload.class_section_id,
+    }
+
+# --- V.4: THAY TOÀN BỘ HÀM DELETE /enrollments (SỬ DỤNG ROW LOCK & GHI EVENT CANCELLED) ---
 @app.delete(
     "/enrollments/{student_id}/{class_section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_enrollment(student_id: str, class_section_id: str) -> Response:
-    sql = """
+    lock_section_sql = """
+    SELECT id
+    FROM class_sections
+    WHERE id = :class_section_id
+    FOR UPDATE
+    """
+    delete_sql = """
     DELETE FROM enrollments
     WHERE student_id = :student_id
       AND class_section_id = :class_section_id
+    RETURNING student_id
     """
-    with engine.begin() as connection:
-        result = connection.execute(
-            text(sql),
-            {
-                "student_id": student_id,
-                "class_section_id": class_section_id,
-            },
-        )
-        if result.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Khong tim thay dang ky can huy",
-            )
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    event_sql = """
+    INSERT INTO enrollment_events
+    (student_id, class_section_id, event_type, source, dataset)
+    VALUES
+    (:student_id, :class_section_id, 'CANCELLED', 'api', 'demo')
+    """
+    parameters = {
+        "student_id": student_id,
+        "class_section_id": class_section_id,
+    }
+
+    try:
+        with engine.begin() as connection:
+            # 1. Khóa dòng lớp học phần (Row Lock) để đồng bộ với POST
+            section = connection.execute(
+                text(lock_section_sql),
+                {"class_section_id": class_section_id},
+            ).first()
+            if section is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay lop hoc phan",
+                )
+
+            # 2. Xóa bản ghi đăng ký trong bảng enrollments
+            deleted = connection.execute(
+                text(delete_sql), parameters
+            ).first()
+            if deleted is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay dang ky can huy",
+                )
+
+            # 3. Ghi sự kiện audit 'CANCELLED' vào bảng enrollment_events
+            connection.execute(text(event_sql), parameters)
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Loi he thong khi huy dang ky",
+        ) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 # --- BÀI 1: API DANH SÁCH GIẢNG VIÊN ---
 @app.get("/lecturers")
@@ -238,7 +298,7 @@ def list_lecturers() -> list[dict[str, object]]:
         rows = connection.execute(text(sql)).mappings().all()
         return [dict(row) for row in rows]
 
-# --- BÀI 2: API CHI TIẾT MỘT LỚP HỌC PHẦN (ĐÃ FIX CHUẨN TÊN CỘT) ---
+# --- BÀI 2: API CHI TIẾT MỘT LỚP HỌC PHẦN ---
 @app.get("/sections/{section_id}")
 def get_section_detail(section_id: str) -> dict[str, object]:
     sql = """
@@ -308,31 +368,3 @@ def update_section_capacity(section_id: str, payload: SectionCapacityUpdate) -> 
             "class_id": section_id,
             "new_capacity": payload.capacity
         }
-
-# --- BÀI 4: TÌM KIẾM VÀ PHÂN TRANG ---
-@app.get("/courses")
-def list_courses(
-    q: str | None = Query(default=None, min_length=1),
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=10, ge=1, le=100)
-) -> list[dict[str, object]]:
-    sql = "SELECT code, name, credits FROM courses"
-    parameters: dict[str, object] = {}
-
-    if q is not None:
-        keyword = q.strip().lower()
-        if not keyword:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tu khoa tim kiem khong duoc rong"
-            )
-        sql += " WHERE LOWER(code) LIKE :keyword OR LOWER(name) LIKE :keyword"
-        parameters["keyword"] = f"%{keyword}%"
-
-    sql += " ORDER BY code OFFSET :skip LIMIT :limit"
-    parameters["skip"] = skip
-    parameters["limit"] = limit
-
-    with engine.connect() as connection:
-        rows = connection.execute(text(sql), parameters).mappings().all()
-        return [dict(row) for row in rows]
